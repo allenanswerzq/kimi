@@ -1,0 +1,3 @@
+[ ] robust contruct multiple lines into complete (whole) phrase
+[ ] pass cargo clippy
+[ ] easy debug internal, logging etc.
