@@ -58,10 +58,24 @@ impl CategoryTree {
             } else {
                 "├── "
             };
-            println!(
-                "{}{}{} ({:?}, {:?})",
-                prefix, connector, cat.id, cat.code, cat.desc
-            );
+            if let Some(code) = &cat.code {
+                println!(
+                    "{}{}{} [{}, {}]",
+                    prefix,
+                    connector,
+                    cat.id,
+                    code,
+                    cat.desc.as_ref().map_or("", |v| v)
+                );
+            } else {
+                println!(
+                    "{}{}{} [{}]",
+                    prefix,
+                    connector,
+                    cat.id,
+                    cat.desc.as_ref().map_or("", |v| v)
+                );
+            }
         }
 
         let child_count = self.children.len();
@@ -78,12 +92,8 @@ impl CategoryTree {
         }
     }
 
-    pub fn parse_one_column(
-        &mut self,
-        cell_text: &str,
-        max_chars: usize,
-    ) -> Result<(), Box<dyn Error>> {
-        let chunks = construct_lines(cell_text, max_chars);
+    pub fn parse_one_column(&mut self, cell_text: &str) -> Result<(), Box<dyn Error>> {
+        let chunks = construct_lines(cell_text);
         let parsed = parse_categories(&chunks)?;
         for cat in parsed {
             let cat_clone = cat.clone();
@@ -97,12 +107,19 @@ impl CategoryTree {
         cell_first: &str,
         cell_second: &str,
     ) -> Result<(), Box<dyn Error>> {
-        let lines_first = construct_lines(cell_first, 21);
-        let lines_second = construct_lines(cell_second, 21);
+        let lines_first = construct_lines(cell_first);
+        let lines_second = construct_lines(cell_second);
 
-        if lines_first.len() != lines_second.len() {
-            return Ok(());
-        }
+        // if lines_first.len() != lines_second.len() {
+        //     println!(
+        //         "{}, {}, {:?}, {:?}",
+        //         lines_first.len(),
+        //         lines_second.len(),
+        //         lines_first,
+        //         lines_second
+        //     );
+        //     return Ok(());
+        // }
 
         // Zip the lines together and concatenate each pair
         let mut concatenated_lines = Vec::new();
@@ -114,7 +131,7 @@ impl CategoryTree {
         }
 
         let final_text = concatenated_lines.join("\n\n\n");
-        let chunks = construct_lines(&final_text, 100);
+        let chunks = construct_lines(&final_text);
         let parsed = parse_categories(&chunks)?;
         for cat in parsed {
             let cat_clone = cat.clone();
@@ -138,12 +155,12 @@ impl CategoryTree {
 
                 if col == 1 {
                     if let Some(first_text) = normalize_first_category(&cell_text) {
-                        self.parse_one_column(&first_text, 20)?;
+                        self.parse_one_column(&first_text)?;
                     } else {
-                        self.parse_one_column(&cell_text, 20)?;
+                        self.parse_one_column(&cell_text)?;
                     }
                 } else if col == 3 {
-                    self.parse_one_column(&cell_text, 23)?;
+                    self.parse_one_column(&cell_text)?;
                 } else if col == 5 {
                     let cell_first = sheet.get_cell_value((col, row));
                     let cell_first = cell_first.get_value().to_string();
@@ -194,7 +211,7 @@ pub fn parse_categories(chunks: &Vec<String>) -> Result<Vec<Category>, Box<dyn E
 
 /// Construct lines
 /// TODO: this function is tricy to make it robust
-pub fn construct_lines(text: &str, max_chars: usize) -> Vec<String> {
+pub fn construct_lines(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut buffer = String::new();
 
@@ -205,42 +222,36 @@ pub fn construct_lines(text: &str, max_chars: usize) -> Vec<String> {
 
     let mut i = 0;
     while i < lines.len() {
-        // println!("{} {}", lines[i], lines[i].len());
-        if lines[i].is_empty() {
-            if !buffer.is_empty() {
-                result.push(buffer.clone());
-                buffer.clear();
-            }
-            i += 1;
-            continue;
-        } else if lines[i].ends_with("负责人")
-            || lines[i].ends_with("责人")
-            || lines[i].ends_with("人员")
+        let line = &lines[i].replace("L", "").replace("S", "").replace("/", "");
+        let line = line.trim();
+        // println!("{} {}", line, line.len());
+        if line.is_empty()
+            || line.ends_with("责人")
+            || line.ends_with("员")
+            || line.ends_with("护士")
+            || line.ends_with("制片人")
+            || line.ends_with("师")
+            || line.ends_with("官")
+            || line.ends_with("律师")
+            || line.ends_with("医生")
+            || line.ends_with("顾问")
+            || line.ends_with("教师")
+            || line.ends_with("警察")
+            || line.ends_with("经理")
+            || line.ends_with("董事")
+            || (line.ends_with("工") && i + 1 < lines.len() && !lines[i + 1].contains("技术人员"))
+            || line.matches('-').count() == 3
         {
-            let line = &lines[i];
             buffer.push_str(line);
-            result.push(buffer.clone());
-            buffer.clear();
-            i += 1;
-            continue;
-        } else if lines[i].len() == max_chars {
-            while i < lines.len() && lines[i].len() == max_chars {
-                let line = &lines[i];
-                buffer.push_str(line);
-                i += 1;
+            if !buffer.is_empty() {
+                // println!("{}", buffer);
+                result.push(buffer.clone());
             }
-            continue;
-        } else if lines[i].len() < max_chars {
-            let line = &lines[i];
-            buffer.push_str(line);
-            result.push(buffer.clone());
             buffer.clear();
             i += 1;
+            continue;
         } else {
-            let line = &lines[i];
             buffer.push_str(line);
-            result.push(buffer.clone());
-            buffer.clear();
             i += 1;
         }
     }
@@ -278,8 +289,7 @@ mod tests {
     #[test]
     fn test_simple_merge() {
         let text = "中国共产党机关\n负责人\n中国共产党基层\n组织负责人";
-        let max_chars = 21;
-        let result = construct_lines(text, max_chars);
+        let result = construct_lines(text);
         let expected = vec![
             "中国共产党机关负责人".to_string(),
             "中国共产党基层组织负责人".to_string(),
@@ -290,8 +300,7 @@ mod tests {
     #[test]
     fn test_empty_lines() {
         let text = "国家权力机关负\n责人\n\n国家行政机关负\n责人";
-        let max_chars = 21;
-        let result = construct_lines(text, max_chars);
+        let result = construct_lines(text);
         let expected = vec![
             "国家权力机关负责人".to_string(),
             "国家行政机关负责人".to_string(),
@@ -302,8 +311,7 @@ mod tests {
     #[test]
     fn test_mixed_lines() {
         let text = "中国共产党机关\n负责人\n国家权力机关负\n责人\n民主党派负责人";
-        let max_chars = 21;
-        let result = construct_lines(text, max_chars);
+        let result = construct_lines(text);
         let expected = vec![
             "中国共产党机关负责人".to_string(),
             "国家权力机关负责人".to_string(),
